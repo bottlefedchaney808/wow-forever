@@ -1,0 +1,6 @@
+## Interface: 11303
+## Title: WfPos
+## Notes: Emits player position to chat for the offline map bridge (/chatlog).
+## Author: local
+## Version: 1.0
+WfPos.lua

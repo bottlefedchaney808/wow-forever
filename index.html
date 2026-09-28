@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WoW Forever — Offline World Map</title>
+<link rel="stylesheet" href="vendor/leaflet.css">
+<style>
+  html, body { height: 100%; margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: #0b0e14; }
+  #app { display: flex; height: 100%; }
+  #map { flex: 1; height: 100%; background: #0e1a2f; }
+  #panel { width: 340px; min-width: 260px; background: #12151c; color: #cfd6e4; overflow-y: auto;
+           border-left: 1px solid #232838; padding: 10px 12px; font-size: 13px; }
+  #panel h1 { font-size: 15px; margin: 2px 0 8px; color: #f0c674; }
+  #panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #8fa3c7;
+              margin: 14px 0 6px; cursor: default; }
+  .grp { margin: 2px 0; }
+  .grp label { display: flex; align-items: center; gap: 7px; cursor: pointer; padding: 2px 0; }
+  .grp input { accent-color: #f0c674; }
+  .chip { display: inline-block; width: 11px; height: 11px; border-radius: 50%; flex: 0 0 auto; }
+  .sub { margin-left: 22px; font-size: 12px; }
+  .sub label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  td, th { border-bottom: 1px solid #232838; padding: 3px 4px; text-align: left; vertical-align: top; }
+  th { color: #8fa3c7; font-weight: 600; }
+  .lv { color: #f0c674; white-space: nowrap; }
+  .note { color: #93a0b8; font-size: 11px; }
+  .new { color: #7fd18a; font-size: 10px; font-weight: 700; }
+  .legend-tip { color: #6c7688; font-size: 11px; margin-top: 10px; }
+  .wmpin { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+           border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; border: 1.5px solid rgba(255,255,255,.85);
+           box-shadow: 0 1px 3px rgba(0,0,0,.7); }
+  .zlabel { color: #fff; font-size: 13px; font-weight: 700; text-shadow: 0 1px 3px #000, 0 0 6px #000;
+            white-space: nowrap; text-align: center; }
+  .llabel { color: #d8e4f8; font-size: 11px; text-shadow: 0 1px 2px #000; white-space: nowrap; text-align: center; }
+  #coord { position: absolute; right: 8px; bottom: 6px; z-index: 900; color: #9fb2d4; font-size: 11px;
+           background: rgba(10,14,22,.75); padding: 2px 8px; border-radius: 4px; pointer-events: none; }
+  #search { width: 100%; box-sizing: border-box; padding: 5px 8px; background: #1a1f2b; color: #dfe6f3;
+            border: 1px solid #2b3245; border-radius: 5px; margin-bottom: 8px; }
+  #results { max-height: 160px; overflow-y: auto; font-size: 12px; }
+  #results div { padding: 3px 4px; cursor: pointer; border-radius: 4px; }
+  #results div:hover { background: #1e2534; }
+  #results .rk { color: #8fa3c7; font-size: 10px; }
+  #qlog { font-size: 12px; }
+  #qlog .qi { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 4px; }
+  #qlog .qi:hover { background: #1e2534; }
+  #qlog .qn { flex: 1; cursor: pointer; }
+  #qlog .qk { color: #8fa3c7; font-size: 10px; }
+  #qlog button { background: none; border: 1px solid #2b3245; color: #8fa3c7; border-radius: 4px;
+                   font-size: 10px; cursor: pointer; padding: 1px 6px; }
+  #qlog button:hover { color: #f0c674; border-color: #f0c674; }
+  #qlog .empty { color: #6c7688; font-size: 11px; }
+  .qmark { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+           border-radius: 50%; background: #f0c674; color: #1a1206; font-size: 10px; font-weight: 700;
+           border: 1.5px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.8); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+  <div id="panel">
+    <h1>WoW Forever &mdash; World Map</h1>
+    <input id="search" placeholder="Search zones, landmarks, NPCs, dungeons&hellip; (click to pin)" autocomplete="off">
+    <div id="results"></div>
+
+    <h2>Quest Log <span class="note">(&#10005; remove &middot; saved in browser)</span></h2>
+    <div id="qlog"><div class="empty">Right-click / click any pin, zone or search result to add it here. Click a name to fly to it.</div></div>
+
+    <h2>Map</h2>
+    <div class="grp"><label><input type="checkbox" id="cb-landmarks" checked> Landmark labels</label></div>
+    <div class="grp"><label><input type="checkbox" id="cb-zones" checked> Zone labels</label></div>
+
+    <h2>Overlays</h2>
+    <div class="grp"><label><input type="checkbox" data-group="instance" checked> Instances</label></div>
+    <div class="grp"><label><input type="checkbox" data-group="transport" checked> Transport (zeppelins/ships)</label></div>
+    <div class="grp"><label><input type="checkbox" data-group="npc" checked> Service NPCs (inns, banks, FM, graves)</label></div>
+    <div class="grp"><label><input type="checkbox" data-group="class-trainers" checked> Class trainers</label></div>
+    <div class="grp"><label><input type="checkbox" data-group="training-supplies" checked> Training &amp; supplies</label></div>
+    <div class="grp"><label><input type="checkbox" data-group="rares" checked> Rare / rare-elite NPCs</label></div>
+
+    <h2>Herbs <span class="note">(click to toggle each)</span></h2>
+    <div id="herb-list"></div>
+    <h2>Mining <span class="note">(click to toggle each)</span></h2>
+    <div id="mine-list"></div>
+
+    <h2>Leveling Plan (1&rarr;60)</h2>
+    <div id="plan"></div>
+
+    <div class="legend-tip">
+      Offline remake of wowhead.com/forever/world-map. Tiles: 9,288 webp (native z7 = 256px).
+      49 zones &middot; 263 landmarks &middot; 1,285 POIs &middot; 17,637 gather nodes.
+      Move mouse over map to read canvas coords (x/y px, 1px = 1/533.33 yd).
+    </div>
+  </div>
+</div>
+<div id="coord"></div>
+<script src="vendor/leaflet.js"></script>
+<script src="data/places.js"></script>
+<script src="data/pois.js"></script>
+<script src="data/nodes.js"></script>
+<script>
+// ---------- coordinate space: canvas 44544 x 29696 px ----------
+var CW = 44544, CH = 29696;
+var KAL = { w: 25088, h: 28672, ox: 0, oy: 0 };
+var EK  = { w: 11776, h: 21504, ox: 32768, oy: 8192 };
+// ---------- custom CRS: canvas px space (44544 x 29696) as the projected world ----------
+// lat = 1 - canvasY/CH, lng = canvasX/CW; at zoom z, scale = 2^(z-7) so tile zoom == map zoom.
+var ForeverCRS = L.extend({}, L.CRS.Simple, {
+  projection: {
+    project: function (ll) { return L.point(ll.lng * CW, ll.lat * CH); },
+    unproject: function (p) { return L.latLng(p.y / CH, p.x / CW); }
+  },
+  transformation: L.transformation(1, 0, -1, 0),
+  scale: function (z) { return Math.pow(2, z - 7); },
+  zoom: function (t) { return Math.log(t) / Math.LN2 + 7; },
+  infinite: true
+});
+// ---------- custom tile layer (Leaflet's bounds option misbehaves here) ----------
+var CONTS = [
+  { key: 'kalimdor',         ox: 0,     oy: 0,    w: 25088, h: 28672 },
+  { key: 'eastern-kingdoms', ox: 32768, oy: 8192, w: 11776, h: 21504 }
+];
+var ForeverLayer = L.Layer.extend({
+  onAdd: function (map) {
+    this._map = map; this._imgs = [];
+    this._container = L.DomUtil.create('div', 'leaflet-pane forever-tiles');
+    this._container.style.zIndex = '250';
+    map.getPane('overlayPane').appendChild(this._container);
+    map.on('moveend zoomend viewreset', this._render, this);
+    this._render();
+  },
+  onRemove: function (map) {
+    map.off('moveend zoomend viewreset', this._render, this);
+    this._imgs.forEach(function (i) { i.remove(); }); this._imgs = [];
+    if (this._container) this._container.remove();
+  },
+  _render: function () {
+    var map = this._map, z = map.getZoom();
+    this._imgs.forEach(function (i) { i.remove(); }); this._imgs = [];
+    var ts = 256 * Math.pow(2, 7 - z);
+    var b = map.getBounds().pad(0.25);
+    var cx1 = b.getWest() * CW, cy1 = (1 - b.getNorth()) * CH;
+    var cx2 = b.getEast() * CW, cy2 = (1 - b.getSouth()) * CH;
+    for (var ci = 0; ci < CONTS.length; ci++) {
+      var c = CONTS[ci];
+      if (cx2 < c.ox || cx1 > c.ox + c.w || cy2 < c.oy || cy1 > c.oy + c.h) continue;
+      var x0 = Math.max(0, Math.floor((cx1 - c.ox) / ts)), y0 = Math.max(0, Math.floor((cy1 - c.oy) / ts));
+      var x1 = Math.floor((cx2 - c.ox) / ts), y1 = Math.floor((cy2 - c.oy) / ts);
+      var maxX = Math.ceil(c.w / ts), maxY = Math.ceil(c.h / ts);
+      for (var ty = y0; ty <= y1; ty++) for (var tx = x0; tx <= x1; tx++) {
+        if (tx < 0 || ty < 0 || tx >= maxX || ty >= maxY) continue;
+        var cx = c.ox + tx * ts, cy = c.oy + ty * ts;
+        var sp = map.latLngToLayerPoint([1 - cy / CH, cx / CW]);
+        var el = L.DomUtil.create('img', 'leaflet-tile');
+        el.src = 'tiles/' + c.key + '/' + z + '/' + ty + '_' + tx + '.webp';
+        el.style.width = '256px'; el.style.height = '256px'; el.style.position = 'absolute';
+        el.style.left = sp.x + 'px'; el.style.top = sp.y + 'px';
+        this._container.appendChild(el); this._imgs.push(el);
+      }
+    }
+  }
+});
+
+var map = L.map('map', { crs: ForeverCRS, minZoom: 2, maxZoom: 8, zoomControl: true });
+map.addLayer(new ForeverLayer());
+map.setView([0.45, 0.5], 3);
+
+// canvas px under mouse
+map.on('mousemove', function (e) {
+  var px = e.latlng.lng * CW, py = (1 - e.latlng.lat) * CH;
+  document.getElementById('coord').textContent =
+    'x ' + Math.round(px) + '  y ' + Math.round(py) +
+    '  (' + Math.round(px / 533.3333) + ', ' + Math.round(py / 533.3333) + ') yd';
+});
+
+// ---------- category styles ----------
+var CAT = {
+  'dungeon':        { c: '#e0524d', t: 'D' },
+  'raid':           { c: '#a569bd', t: 'R' },
+  'zeppelin':       { c: '#5bc0de', t: 'Z' },
+  'ship':           { c: '#4a90d9', t: 'S' },
+  'flight-master':  { c: '#f0ad4e', t: 'F' },
+  'graveyard':      { c: '#9aa7b8', t: 'G' },
+  'innkeeper':      { c: '#e67e22', t: 'I' },
+  'stable-master':  { c: '#c0392b', t: 'M' },
+  'banker':         { c: '#34495e', t: 'B' },
+  'auctioneer':     { c: '#f39c12', t: 'A' },
+  'battlemaster':   { c: '#e74c3c', t: 'W' },
+  'rare':           { c: '#ff3b30', t: '!' },
+  'rare-elite':     { c: '#ff2d55', t: '!!' },
+  'weapon-trainer': { c: '#d35400', t: 'T' },
+  'ammunition':     { c: '#7f8c8d', t: 'A' },
+  'reagents':       { c: '#16a085', t: 'V' }
+};
+var CATS = window.WH_POIS ? {} : {};
+window.WH_POIS.forEach(function (p) { if (p.c.indexOf('class-trainer') === 0) CAT[p.c] = { c: '#ffd700', t: 'C' }; });
+
+function pin(cat, size) {
+  var st = CAT[cat] || { c: '#888', t: '?' };
+  var s = size || (cat === 'rare-elite' ? 18 : 14);
+  return L.divIcon({
+    className: '', iconSize: [s, s], iconAnchor: [s / 2, s / 2],
+    html: '<div class="wmpin" style="background:' + st.c + '">' + st.t + '</div>'
+  });
+}
+
+// ---------- quest log (localStorage-backed makeshift questie) ----------
+var qlog = [];
+try { qlog = JSON.parse(localStorage.getItem('wf_qlog') || '[]'); } catch (e) { qlog = []; }
+var qlogLayer = L.layerGroup().addTo(map);
+var qlogBox = document.getElementById('qlog');
+
+function saveQlog() {
+  try { localStorage.setItem('wf_qlog', JSON.stringify(qlog)); } catch (e) {}
+  renderQlog();
+}
+function renderQlog() {
+  qlogBox.innerHTML = '';
+  if (!qlog.length) {
+    qlogBox.innerHTML = '<div class="empty">Right-click / click any pin, zone or search result to add it here. Click a name to fly to it.</div>';
+    return;
+  }
+  qlog.forEach(function (q, i) {
+    var d = document.createElement('div');
+    d.className = 'qi';
+    d.innerHTML = '<span class="qn">' + q.n + '</span><span class="qk">' + q.k + '</span>' +
+      (q.lv ? '<span class="qk">' + q.lv + '</span>' : '') +
+      '<button title="remove">&#10005;</button>';
+    d.querySelector('.qn').onclick = function () { map.setView(q.ll, Math.max(map.getZoom(), 6)); };
+    d.querySelector('button').onclick = function () { qlog.splice(i, 1); saveQlog(); };
+    qlogBox.appendChild(d);
+  });
+}
+function addQlog(n, k, ll, lv) {
+  if (qlog.some(function (q) { return q.n === n && q.ll[0] === ll[0] && q.ll[1] === ll[1]; })) return;
+  qlog.push({ n: n, k: k, ll: ll, lv: lv || '' });
+  saveQlog();
+  qlogLayer.clearLayers();
+  qlog.forEach(function (q, i) {
+    qlogLayer.addLayer(L.marker(q.ll, {
+      icon: L.divIcon({ className: '', iconSize: [16, 16], iconAnchor: [8, 8],
+        html: '<div class="qmark">' + (i + 1) + '</div>' }),
+      title: q.n
+    }).bindTooltip('<b>#' + (i + 1) + ' ' + q.n + '</b>', { direction: 'top' }));
+  });
+}
+function removeQlog(n, ll) {
+  qlog = qlog.filter(function (q) { return !(q.n === n && q.ll[0] === ll[0] && q.ll[1] === ll[1]); });
+  saveQlog();
+}
+renderQlog();
+qlog.forEach(function (q, i) {
+  qlogLayer.addLayer(L.marker(q.ll, {
+    icon: L.divIcon({ className: '', iconSize: [16, 16], iconAnchor: [8, 8],
+      html: '<div class="qmark">' + (i + 1) + '</div>' }),
+    title: q.n
+  }).bindTooltip('<b>#' + (i + 1) + ' ' + q.n + '</b>', { direction: 'top' }));
+});
+
+// ---------- POI markers by group ----------
+var poiLayers = {};
+['instance', 'transport', 'npc', 'class-trainers', 'training-supplies', 'rares'].forEach(function (g) { poiLayers[g] = L.layerGroup(); });
+window.WH_POIS.forEach(function (p) {
+  var grp;
+  var c = p.c;
+  if (c === 'dungeon' || c === 'raid') grp = 'instance';
+  else if (c === 'zeppelin' || c === 'ship') grp = 'transport';
+  else if (c === 'rare' || c === 'rare-elite') grp = 'rares';
+  else if (c.indexOf('class-trainer') === 0) grp = 'class-trainers';
+  else if (c === 'weapon-trainer' || c === 'ammunition' || c === 'reagents') grp = 'training-supplies';
+  else grp = 'npc';
+  var m = L.marker(p.ll, { icon: pin(c) });
+  m.bindTooltip('<b>' + p.n + '</b><br><span style="color:#8fa3c7">' + c + '</span>' +
+                (p.npc ? '<br>NPC id ' + p.npc : ''), { direction: 'top' });
+  m.on('click', function () { addQlog(p.n, c, p.ll); });
+  m.on('contextmenu', function () { removeQlog(p.n, p.ll); });
+  poiLayers[grp].addLayer(m);
+});
+var groupChecked = { instance: true, transport: true, npc: true, 'class-trainers': true, 'training-supplies': true, rares: true };
+Object.keys(poiLayers).forEach(function (g) { if (groupChecked[g]) poiLayers[g].addTo(map); });
+document.querySelectorAll('input[data-group]').forEach(function (cb) {
+  cb.addEventListener('change', function () {
+    var g = cb.dataset.group;
+    if (cb.checked) poiLayers[g].addTo(map); else map.removeLayer(poiLayers[g]);
+  });
+});
+
+// ---------- node categories (herbs/mining) ----------
+var nodeLayers = {};
+function nodeColor(key, i) {
+  var hue = key.indexOf('herb') === 0 ? (95 + (i % 5) * 14) : (25 + (i % 5) * 12);
+  return 'hsl(' + hue + ',65%,55%)';
+}
+var hi = 0, mi = 0;
+Object.keys(window.WH_NODES).forEach(function (k) {
+  var n = window.WH_NODES[k];
+  var col = nodeColor(k, k.indexOf('herb') === 0 ? (hi++) : (mi++));
+  var lg = L.layerGroup();
+  var pts = n.pts.map(function (ll) {
+    return L.circleMarker(ll, { radius: 2.5, color: col, weight: 1, fillColor: col, fillOpacity: 0.85, interactive: false });
+  });
+  lg.addLayer(L.canvas ? L.layerGroup(pts) : L.layerGroup(pts));
+  nodeLayers[k] = { layer: lg, color: col, name: n.n, herb: k.indexOf('herb') === 0 };
+});
+var herbBox = document.getElementById('herb-list'), mineBox = document.getElementById('mine-list');
+Object.keys(nodeLayers).forEach(function (k) {
+  var nd = nodeLayers[k];
+  var box = nd.herb ? herbBox : mineBox;
+  var lab = document.createElement('label');
+  lab.className = 'sub';
+  lab.innerHTML = '<input type="checkbox"> <span class="chip" style="background:' + nd.color + '"></span> ' + nd.name;
+  lab.querySelector('input').addEventListener('change', function (e) {
+    if (e.target.checked) nd.layer.addTo(map); else map.removeLayer(nd.layer);
+  });
+  box.appendChild(lab);
+  // default: show only a few common ones? default off to keep load sane
+});
+// default: show the 8 classic early herbs + copper/tin for a starter view
+['herb-blindweed', 'herb-bruiseweed', 'herb-fadeleaf', 'herb-kingsblood', 'herb-mageroyal', 'herb-peacebloom', 'herb-silverleaf', 'herb-wild-steelbloom', 'ore-copper-vein', 'ore-tin-vein'].forEach(function (k) {
+  if (nodeLayers[k]) { nodeLayers[k].layer.addTo(map); herbBox && null; }
+});
+
+// ---------- labels ----------
+var zoneLayer = L.layerGroup();
+window.WH_PLACES.zones.forEach(function (z) {
+  var mk = L.marker(z.ll, {
+    icon: L.divIcon({ className: '', iconSize: [160, 18], iconAnchor: [80, 9],
+                      html: '<div class="zlabel">' + z.n + '</div>' })
+  });
+  mk.on('click', function () { addQlog(z.n, 'zone', z.ll); });
+  mk.on('contextmenu', function () { removeQlog(z.n, z.ll); });
+  zoneLayer.addLayer(mk);
+});
+zoneLayer.addTo(map);
+var landLayer = L.layerGroup();
+window.WH_PLACES.landmarks.forEach(function (l) {
+  landLayer.addLayer(L.marker(l.ll, {
+    icon: L.divIcon({ className: '', iconSize: [140, 14], iconAnchor: [70, 7],
+                      html: '<div class="llabel">' + l.n + '</div>' }),
+    interactive: false
+  }));
+});
+document.getElementById('cb-landmarks').addEventListener('change', function (e) {
+  if (e.target.checked) landLayer.addTo(map); else map.removeLayer(landLayer);
+});
+document.getElementById('cb-zones').addEventListener('change', function (e) {
+  if (e.target.checked) zoneLayer.addTo(map); else map.removeLayer(zoneLayer);
+});
+
+// ---------- search ----------
+var SEARCH = [];
+window.WH_PLACES.zones.forEach(function (z) { SEARCH.push({ n: z.n, k: 'zone', ll: z.ll }); });
+window.WH_PLACES.landmarks.forEach(function (z) { SEARCH.push({ n: z.n, k: 'landmark', ll: z.ll }); });
+window.WH_POIS.forEach(function (p) { SEARCH.push({ n: p.n, k: p.c, ll: p.ll }); });
+var sInput = document.getElementById('search'), sRes = document.getElementById('results');
+sInput.addEventListener('input', function () {
+  var q = sInput.value.trim().toLowerCase();
+  sRes.innerHTML = '';
+  if (!q) return;
+  var hits = SEARCH.filter(function (x) { return x.n.toLowerCase().indexOf(q) !== -1; }).slice(0, 30);
+  hits.forEach(function (h) {
+    var d = document.createElement('div');
+    d.innerHTML = h.n + ' <span class="rk">' + h.k + '</span>';
+    d.onclick = function () {
+      addQlog(h.n, h.k, h.ll);
+      map.setView(h.ll, Math.max(map.getZoom(), 6));
+      sRes.innerHTML = ''; sInput.value = '';
+    };
+    sRes.appendChild(d);
+  });
+});
+
+// ---------- leveling plan ----------
+var ZONES = [
+  // zone, levels, side, note
+  ["Zephras Isle", "1-12", "Skyborne", "NEW starter zone (Skyborne race)"],
+  ["Durotar / Elwynn Forest", "1-20", "H / A", "Classic starter zones"],
+  ["Mulgore / Westfall", "18-26", "H / A", ""],
+  ["The Barrens / Redridge Mountains", "26-34", "H / A", ""],
+  ["Ashenvale / Dustwallow Marsh", "26-35", "H / A", ""],
+  ["Thousand Needles / Wetlands", "30-40", "H / A", ""],
+  ["Stonetalon Mountains / Duskwood", "30-40", "H / A", ""],
+  ["Desolace / Loch Modan", "35-45", "H / A", ""],
+  ["Feralas / Swamp of Sorrows", "35-45", "H / A", ""],
+  ["Felwood / Arathi Highlands", "35-40", "H / A", ""],
+  ["Silithus / Alterac Mountains", "38-45", "H / A", ""],
+  ["Un'Goro Crater / Badlands", "40-50", "H / A", ""],
+  ["Winterspring / Dun Morogh", "45-55", "H / A", ""],
+  ["Azshara / Searing Gorge", "45-55", "H / A", ""],
+  ["Tanaris / Tirisfal Glades", "45-55", "H / A", ""],
+  ["Hillsbrad Foothills / Blasted Lands", "45-55", "H / A", ""],
+  ["Silverpine Forest / Eastern Plaguelands", "45-55", "H / A", ""],
+  ["The Hinterlands", "45-60", "both", "High-level endgame leveling"],
+  ["Mount Hyjal", "60", "both", "NEW endgame zone (post-Hyjal-raid)"]
+];
+var NEW_ZONES = ["Shen'dralas (between Mulgore & Desolace, sends to Razorfen Downs + Maraudon)",
+                "Riverglades (levels ~35-45, new zone in EK, reached via Steamwheedle boat to Powderfuse Port)"];
+var DUNGEONS = [
+  ["Hall of Thanes", "13-18", "NEW"],
+  ["Ruins of Lordaeron", "15-20", "NEW"],
+  ["Excavation Site (Wetlands)", "24-29", "NEW"],
+  ["City of Dalaran", "28-33", "NEW"],
+  ["The Drowned City", "35-40", "NEW"],
+  ["Krol'Dok Stronghold", "40-45", "NEW"],
+  ["Alcaz Island Prison", "48-53", "NEW"],
+  ["Blackmaw Hold", "55-60", "NEW"],
+  ["Shaper's Terrace", "58-60", "NEW"],
+  ["Classic dungeons", "per bracket", "see Instances overlay"]
+];
+var plan = document.getElementById('plan');
+function table(rows, cols) {
+  var h = '<table><tr>' + cols.map(function (c) { return '<th>' + c + '</th>'; }).join('') + '</tr>';
+  rows.forEach(function (r) { h += '<tr>' + r.map(function (c, i) {
+      return '<td class="' + (i === 1 ? 'lv' : '') + '">' + c + (r.length > 2 && i === 2 && c === 'NEW' ? ' <span class="new">NEW</span>' : '') + '</td>';
+    }).join('') + '</tr>'; });
+  return h + '</table>';
+}
+// click a zone/dungeon row -> find its pin (if on map) and add to quest log
+function findPoi(name) {
+  var q = name.toLowerCase().replace(/\s*\(.*\)/, '');
+  return window.WH_POIS.filter(function (p) { return p.c === 'dungeon' || p.c === 'raid'; })
+    .filter(function (p) { return p.n.toLowerCase().indexOf(q) !== -1 || q.indexOf(p.n.toLowerCase()) !== -1; })[0];
+}
+function findZone(name) {
+  var q = name.split(' / ')[0].toLowerCase();
+  return window.WH_PLACES.zones.filter(function (z) { return z.n.toLowerCase().indexOf(q) !== -1 || q.indexOf(z.n.toLowerCase()) !== -1; })[0];
+}
+function pinFromName(name) {
+  var p = findPoi(name) || findZone(name);
+  if (p) { addQlog(p.n, p.n === p.n && findPoi(name) ? 'dungeon' : 'zone', p.ll); }
+  return p;
+}
+function rowsClickable(rows, cols) {
+  var h = '<table><tr>' + cols.map(function (c) { return '<th>' + c + '</th>'; }).join('') + '</tr>';
+  rows.forEach(function (r) {
+    h += '<tr>';
+    r.forEach(function (c, i) {
+      var cell = '<td class="' + (i === 1 ? 'lv' : '') + '">' + c;
+      if (r.length > 2 && i === 2 && c === 'NEW') cell += ' <span class="new">NEW</span>';
+      cell += '</td>';
+      if (i === 0 && c !== 'Classic dungeons') {
+        cell = cell.replace('<td', '<td class="plink" style="cursor:pointer" title="click to add to quest log" data-n="' + c.replace(/"/g, '&quot;') + '"');
+      }
+      h += cell;
+    });
+    h += '</tr>';
+  });
+  return h + '</table>';
+}
+plan.innerHTML =
+  '<b>Route:</b> starter &rarr; 20 &rarr; 30 &rarr; 40 &rarr; 50 &rarr; 60, dungeons at every bracket (left column = Horde / right = Alliance).<br>' +
+  '<p class="note">Click a zone or dungeon name to pin it to your quest log.</p><br>' +
+  rowsClickable(ZONES, ['Zone', 'Levels', 'Side']) +
+  '<h2>Other new zones</h2><ul style="font-size:12px;margin:4px 0">' +
+  NEW_ZONES.map(function (z) { return '<li>' + z + '</li>'; }).join('') + '</ul>' +
+  '<h2>New dungeons at launch</h2>' +
+  rowsClickable(DUNGEONS, ['Dungeon', 'Levels', '']) +
+  '<p class="note">Level brackets for classic zones are standard vanilla ranges; new-zone brackets from Wowhead Forever guides (zones overview + roadmap, Sept 2026).</p>';
+plan.querySelectorAll('.plink').forEach(function (td) {
+  td.onclick = function () {
+    var hit = pinFromName(td.dataset.n);
+    if (hit) map.setView(hit.ll, Math.max(map.getZoom(), 6));
+  };
+});
+
+// ---------- deep links ----------
+// wowhead style: #<zoom>/<px>/<py>  (e.g. #1.5/22288/17604)
+// this map:      #<lat>/<lng>/<zoom>  (lat/lng in [-1,1], zoom 2-8)
+(function () {
+  var h = location.hash.replace(/^#/, '').split('/');
+  if (h.length !== 3) return;
+  var a = parseFloat(h[0]), b = parseFloat(h[1]), c = parseInt(h[2], 10);
+  if (isNaN(a) || isNaN(b) || isNaN(c)) return;
+  if (a >= -1.5 && a <= 1.5 && b >= -1.5 && b <= 1.5 && c >= 2 && c <= 8) {
+    map.setView([a, b], c);
+  } else {
+    map.setView([1 - c / CH, b / CW], 6);
+  }
+})();
+</script>
+</body>
+</html>
