@@ -63,7 +63,9 @@ def expected_grid_dimensions(continent: str, zoom: int) -> tuple[int, int]:
 
 def parse_js_assignment(text: str, variable: str) -> Any:
     """Read the JSON literal assigned to a known window variable."""
-    match = re.search(r"(?:window\.)?" + re.escape(variable) + r"\s*=\s*", text)
+    # anchor to start of file to avoid matching a later occurrence
+    text_stripped = text.lstrip()
+    match = re.search(r"(?:window\.)?" + re.escape(variable) + r"\s*=\s*", text_stripped)
     if not match:
         raise ValueError(f"assignment {variable} not found")
     payload = text[match.end():].strip()
