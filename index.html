@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="wowhead-data-version" content="14">
 <title>WoW Forever — Offline World Map</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
 <style>
@@ -88,8 +89,9 @@
 
     <div class="legend-tip">
       Offline remake of wowhead.com/forever/world-map. Tiles: 9,288 webp (native z7 = 256px).
-      49 zones &middot; 263 landmarks &middot; 1,285 POIs &middot; 17,637 gather nodes.
+      49 zones · 256 landmarks · 1,285 POIs · 17,637 gather nodes.
       Move mouse over map to read canvas coords (x/y px, 1px = 1/533.33 yd).
+      <span class="note">Dataset v14 · hash dae2c49d156c8dfb</span>
     </div>
   </div>
 </div>
@@ -98,6 +100,7 @@
 <script src="data/places.js"></script>
 <script src="data/pois.js"></script>
 <script src="data/nodes.js"></script>
+<script src="data/questlog_schema.js"></script>
 <script>
 // ---------- coordinate space: canvas 44544 x 29696 px ----------
 var CW = 44544, CH = 29696;
@@ -137,7 +140,11 @@ var ForeverLayer = L.Layer.extend({
   _render: function () {
     var map = this._map, z = map.getZoom();
     this._imgs.forEach(function (i) { i.remove(); }); this._imgs = [];
-    var ts = 256 * Math.pow(2, 7 - z);
+    // Source tiles exist at z0-z7 only. At higher zoom, render the native
+    // (z7) grid and upscale each tile so overzoom never requests a 404 tile.
+    var tz = Math.min(z, 7);
+    var ts = 256 * Math.pow(2, 7 - tz);
+    var upscale = Math.pow(2, z - tz);
     var b = map.getBounds().pad(0.25);
     var cx1 = b.getWest() * CW, cy1 = (1 - b.getNorth()) * CH;
     var cx2 = b.getEast() * CW, cy2 = (1 - b.getSouth()) * CH;
@@ -152,8 +159,9 @@ var ForeverLayer = L.Layer.extend({
         var cx = c.ox + tx * ts, cy = c.oy + ty * ts;
         var sp = map.latLngToLayerPoint([1 - cy / CH, cx / CW]);
         var el = L.DomUtil.create('img', 'leaflet-tile');
-        el.src = 'tiles/' + c.key + '/' + z + '/' + ty + '_' + tx + '.webp';
-        el.style.width = '256px'; el.style.height = '256px'; el.style.position = 'absolute';
+        el.onerror = function (e) { e.target.remove(); };
+        el.src = 'tiles/' + c.key + '/' + tz + '/' + ty + '_' + tx + '.webp';
+        el.style.width = (256 * upscale) + 'px'; el.style.height = (256 * upscale) + 'px'; el.style.position = 'absolute';
         el.style.left = sp.x + 'px'; el.style.top = sp.y + 'px';
         this._container.appendChild(el); this._imgs.push(el);
       }
@@ -204,15 +212,31 @@ function pin(cat, size) {
   });
 }
 
-// ---------- quest log (localStorage-backed makeshift questie) ----------
-var qlog = [];
-try { qlog = JSON.parse(localStorage.getItem('wf_qlog') || '[]'); } catch (e) { qlog = []; }
+// ---------- quest log (LWW-element set, localStorage-backed) ----------
+var qlogPlayer = localStorage.getItem('wf_player_id');
+if (!qlogPlayer) {
+  qlogPlayer = 'local-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  try { localStorage.setItem('wf_player_id', qlogPlayer); } catch (e) {}
+}
+var qlogState = WFQuestLog.create();
+try {
+  var storedQlog = JSON.parse(localStorage.getItem('wf_qlog') || '[]');
+  if (Array.isArray(storedQlog)) {
+    qlogState = WFQuestLog.migrateLegacy(storedQlog, qlogPlayer);
+    try { localStorage.setItem('wf_qlog', JSON.stringify(qlogState)); } catch (e) {}
+  } else {
+    qlogState = WFQuestLog.mergeStates(qlogState, storedQlog);
+  }
+} catch (e) { qlogState = WFQuestLog.create(); }
+var qlog = WFQuestLog.list(qlogState, qlogPlayer);
 var qlogLayer = L.layerGroup().addTo(map);
 var qlogBox = document.getElementById('qlog');
 
 function saveQlog() {
-  try { localStorage.setItem('wf_qlog', JSON.stringify(qlog)); } catch (e) {}
+  qlog = WFQuestLog.list(qlogState, qlogPlayer);
+  try { localStorage.setItem('wf_qlog', JSON.stringify(qlogState)); } catch (e) {}
   renderQlog();
+  renderQlogMarkers();
 }
 function renderQlog() {
   qlogBox.innerHTML = '';
@@ -220,21 +244,18 @@ function renderQlog() {
     qlogBox.innerHTML = '<div class="empty">Right-click / click any pin, zone or search result to add it here. Click a name to fly to it.</div>';
     return;
   }
-  qlog.forEach(function (q, i) {
+  qlog.forEach(function (q) {
     var d = document.createElement('div');
     d.className = 'qi';
     d.innerHTML = '<span class="qn">' + q.n + '</span><span class="qk">' + q.k + '</span>' +
       (q.lv ? '<span class="qk">' + q.lv + '</span>' : '') +
       '<button title="remove">&#10005;</button>';
     d.querySelector('.qn').onclick = function () { map.setView(q.ll, Math.max(map.getZoom(), 6)); };
-    d.querySelector('button').onclick = function () { qlog.splice(i, 1); saveQlog(); };
+    d.querySelector('button').onclick = function () { removeQlog(q.n, q.ll); };
     qlogBox.appendChild(d);
   });
 }
-function addQlog(n, k, ll, lv) {
-  if (qlog.some(function (q) { return q.n === n && q.ll[0] === ll[0] && q.ll[1] === ll[1]; })) return;
-  qlog.push({ n: n, k: k, ll: ll, lv: lv || '' });
-  saveQlog();
+function renderQlogMarkers() {
   qlogLayer.clearLayers();
   qlog.forEach(function (q, i) {
     qlogLayer.addLayer(L.marker(q.ll, {
@@ -244,18 +265,21 @@ function addQlog(n, k, ll, lv) {
     }).bindTooltip('<b>#' + (i + 1) + ' ' + q.n + '</b>', { direction: 'top' }));
   });
 }
+function addQlog(n, k, ll, lv) {
+  if (qlog.some(function (q) { return q.n === n && q.ll[0] === ll[0] && q.ll[1] === ll[1]; })) return;
+  qlogState = WFQuestLog.put(qlogState, qlogPlayer, { n: n, k: k, ll: ll, lv: lv || '' });
+  saveQlog();
+}
 function removeQlog(n, ll) {
-  qlog = qlog.filter(function (q) { return !(q.n === n && q.ll[0] === ll[0] && q.ll[1] === ll[1]); });
+  var entry = qlogState.entries.find(function (item) {
+    return item.player === qlogPlayer && !item.deleted && item.value.n === n &&
+      item.value.ll[0] === ll[0] && item.value.ll[1] === ll[1];
+  });
+  if (entry) qlogState = WFQuestLog.remove(qlogState, qlogPlayer, entry.entity_id, Date.now());
   saveQlog();
 }
 renderQlog();
-qlog.forEach(function (q, i) {
-  qlogLayer.addLayer(L.marker(q.ll, {
-    icon: L.divIcon({ className: '', iconSize: [16, 16], iconAnchor: [8, 8],
-      html: '<div class="qmark">' + (i + 1) + '</div>' }),
-    title: q.n
-  }).bindTooltip('<b>#' + (i + 1) + ' ' + q.n + '</b>', { direction: 'top' }));
-});
+renderQlogMarkers();
 
 // ---------- POI markers by group ----------
 var poiLayers = {};
@@ -295,13 +319,69 @@ var hi = 0, mi = 0;
 Object.keys(window.WH_NODES).forEach(function (k) {
   var n = window.WH_NODES[k];
   var col = nodeColor(k, k.indexOf('herb') === 0 ? (hi++) : (mi++));
-  var lg = L.layerGroup();
-  var pts = n.pts.map(function (ll) {
-    return L.circleMarker(ll, { radius: 2.5, color: col, weight: 1, fillColor: col, fillOpacity: 0.85, interactive: false });
-  });
-  lg.addLayer(L.canvas ? L.layerGroup(pts) : L.layerGroup(pts));
-  nodeLayers[k] = { layer: lg, color: col, name: n.n, herb: k.indexOf('herb') === 0 };
+  nodeLayers[k] = {
+    points: n.pts, color: col, name: n.n,
+    herb: k.indexOf('herb') === 0, visible: false
+  };
 });
+
+// One canvas for all node categories. Redraws cull points outside the viewport.
+var NodeCanvasLayer = L.Layer.extend({
+  onAdd: function (map) {
+    this._map = map;
+    this._canvas = L.DomUtil.create('canvas', 'leaflet-node-canvas');
+    this._canvas.style.position = 'absolute';
+    this._canvas.style.pointerEvents = 'none';
+    map.getPanes().overlayPane.appendChild(this._canvas);
+    map.on('moveend zoomend viewreset resize', this._redraw, this);
+    this._redraw();
+  },
+  onRemove: function (map) {
+    map.off('moveend zoomend viewreset resize', this._redraw, this);
+    if (this._canvas) this._canvas.remove();
+    this._canvas = null;
+  },
+  redraw: function () {
+    if (this._map && this._canvas) this._redraw();
+    return this;
+  },
+  _redraw: function () {
+    var map = this._map, canvas = this._canvas;
+    if (!map || !canvas) return;
+    var size = map.getSize(), dpr = window.devicePixelRatio || 1;
+    var origin = map.containerPointToLayerPoint([0, 0]);
+    L.DomUtil.setPosition(canvas, origin);
+    canvas.style.width = size.x + 'px';
+    canvas.style.height = size.y + 'px';
+    canvas.width = Math.round(size.x * dpr);
+    canvas.height = Math.round(size.y * dpr);
+    var ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size.x, size.y);
+
+    var bounds = map.getBounds();
+    Object.keys(nodeLayers).forEach(function (key) {
+      var category = nodeLayers[key];
+      if (!category.visible) return;
+      ctx.fillStyle = category.color;
+      ctx.strokeStyle = category.color;
+      ctx.globalAlpha = 0.85;
+      category.points.forEach(function (ll) {
+        if (!bounds.contains(ll)) return;
+        var point = map.latLngToLayerPoint(ll);
+        var x = point.x - origin.x, y = point.y - origin.y;
+        ctx.beginPath();
+        ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      });
+      ctx.globalAlpha = 1;
+    });
+  }
+});
+var nodeCanvasLayer = new NodeCanvasLayer();
+
 var herbBox = document.getElementById('herb-list'), mineBox = document.getElementById('mine-list');
 Object.keys(nodeLayers).forEach(function (k) {
   var nd = nodeLayers[k];
@@ -309,16 +389,21 @@ Object.keys(nodeLayers).forEach(function (k) {
   var lab = document.createElement('label');
   lab.className = 'sub';
   lab.innerHTML = '<input type="checkbox"> <span class="chip" style="background:' + nd.color + '"></span> ' + nd.name;
-  lab.querySelector('input').addEventListener('change', function (e) {
-    if (e.target.checked) nd.layer.addTo(map); else map.removeLayer(nd.layer);
+  nd.checkbox = lab.querySelector('input');
+  nd.checkbox.addEventListener('change', function (e) {
+    nd.visible = e.target.checked;
+    nodeCanvasLayer.redraw();
   });
   box.appendChild(lab);
-  // default: show only a few common ones? default off to keep load sane
 });
 // default: show the 8 classic early herbs + copper/tin for a starter view
 ['herb-blindweed', 'herb-bruiseweed', 'herb-fadeleaf', 'herb-kingsblood', 'herb-mageroyal', 'herb-peacebloom', 'herb-silverleaf', 'herb-wild-steelbloom', 'ore-copper-vein', 'ore-tin-vein'].forEach(function (k) {
-  if (nodeLayers[k]) { nodeLayers[k].layer.addTo(map); herbBox && null; }
+  if (nodeLayers[k]) {
+    nodeLayers[k].visible = true;
+    nodeLayers[k].checkbox.checked = true;
+  }
 });
+nodeCanvasLayer.addTo(map);
 
 // ---------- labels ----------
 var zoneLayer = L.layerGroup();
@@ -352,21 +437,83 @@ var SEARCH = [];
 window.WH_PLACES.zones.forEach(function (z) { SEARCH.push({ n: z.n, k: 'zone', ll: z.ll }); });
 window.WH_PLACES.landmarks.forEach(function (z) { SEARCH.push({ n: z.n, k: 'landmark', ll: z.ll }); });
 window.WH_POIS.forEach(function (p) { SEARCH.push({ n: p.n, k: p.c, ll: p.ll }); });
+
+// Index each name by its unique 1-, 2-, and 3-character grams. Queries use
+// the smallest matching posting list, then verify the full substring and keep
+// SEARCH order. This preserves indexOf substring behavior without scanning all
+// 1,500+ names for every keystroke.
+var SEARCH_INDEX = Object.create(null);
+SEARCH.forEach(function (item, index) {
+  item.ln = item.n.toLowerCase();
+  var seen = Object.create(null);
+  for (var size = 1; size <= 3; size++) {
+    for (var i = 0; i <= item.ln.length - size; i++) {
+      var gram = item.ln.slice(i, i + size);
+      if (seen[gram]) continue;
+      seen[gram] = true;
+      (SEARCH_INDEX[gram] || (SEARCH_INDEX[gram] = [])).push(index);
+    }
+  }
+});
+function findSearchHits(query) {
+  var grams = [], size = Math.min(3, query.length);
+  for (var i = 0; i <= query.length - size; i++) {
+    var gram = query.slice(i, i + size);
+    if (grams.indexOf(gram) === -1) grams.push(gram);
+  }
+  var candidates = null;
+  grams.forEach(function (gram) {
+    var posting = SEARCH_INDEX[gram] || [];
+    if (!candidates || posting.length < candidates.length) candidates = posting;
+  });
+  var hits = [];
+  if (!candidates) return hits;
+  for (var i = 0; i < candidates.length && hits.length < 30; i++) {
+    var item = SEARCH[candidates[i]];
+    if (item.ln.indexOf(query) !== -1) hits.push(item);
+  }
+  return hits;
+}
+
 var sInput = document.getElementById('search'), sRes = document.getElementById('results');
+// Allocate result rows once; input events only update/filter these existing rows.
+var searchRows = [];
+for (var rowIndex = 0; rowIndex < 30; rowIndex++) {
+  var row = document.createElement('div');
+  var rowName = document.createTextNode('');
+  var rowType = document.createElement('span');
+  rowType.className = 'rk';
+  row.appendChild(rowName);
+  row.appendChild(document.createTextNode(' '));
+  row.appendChild(rowType);
+  row.style.display = 'none';
+  row.onclick = function () {
+    var h = this.searchResult;
+    if (!h) return;
+    addQlog(h.n, h.k, h.ll);
+    map.setView(h.ll, Math.max(map.getZoom(), 6));
+    sInput.value = '';
+    searchRows.forEach(function (resultRow) {
+      resultRow.searchResult = null;
+      resultRow.style.display = 'none';
+    });
+  };
+  row.searchName = rowName;
+  row.searchType = rowType;
+  searchRows.push(row);
+  sRes.appendChild(row);
+}
 sInput.addEventListener('input', function () {
   var q = sInput.value.trim().toLowerCase();
-  sRes.innerHTML = '';
-  if (!q) return;
-  var hits = SEARCH.filter(function (x) { return x.n.toLowerCase().indexOf(q) !== -1; }).slice(0, 30);
-  hits.forEach(function (h) {
-    var d = document.createElement('div');
-    d.innerHTML = h.n + ' <span class="rk">' + h.k + '</span>';
-    d.onclick = function () {
-      addQlog(h.n, h.k, h.ll);
-      map.setView(h.ll, Math.max(map.getZoom(), 6));
-      sRes.innerHTML = ''; sInput.value = '';
-    };
-    sRes.appendChild(d);
+  var hits = q ? findSearchHits(q) : [];
+  searchRows.forEach(function (row, index) {
+    var hit = hits[index];
+    row.searchResult = hit || null;
+    row.style.display = hit ? '' : 'none';
+    if (hit) {
+      row.searchName.nodeValue = hit.n;
+      row.searchType.textContent = hit.k;
+    }
   });
 });
 

@@ -22,19 +22,23 @@
   }
 
 
-  // SHA-256 implementation removed (unused; versionHash uses Node crypto or FNV)
+  // versionHash uses the FNV-1a hash() over canonical entries (no Node crypto).
 
 
   // FNV-1a 64-bit hash: deterministic, synchronous, no browser APIs.
-  // Uses BigInt for exact 64-bit arithmetic; the hex token is used in the sync wire format.
+  // BigInt literals (n suffix) keep the constants exact — passing the hex
+  // literals through Number() first silently rounded the prime to exactly
+  // 2**64, which zeroed every digest and collapsed all entity IDs to one.
+  // Mask at each step so the arithmetic wraps like true 64-bit FNV-1a.
   function hash(text) {
-    var h = BigInt(0xD87559C76B628D2F);
-    var p = BigInt(0x1000000000000000B);
+    var h = 0xcbf29ce484222325n;
+    var p = 0x00000100000001b3n;
+    var mask = 0xffffffffffffffffn;
     for (var i = 0; i < text.length; i += 1) {
       h ^= BigInt(text.charCodeAt(i));
-      h *= p;
+      h = (h * p) & mask;
     }
-    return ('0000000000000000' + (h & 0xFFFFFFFFFFFFFFFFn).toString(16)).slice(-16);
+    return ('0000000000000000' + h.toString(16)).slice(-16);
   }
 
   function clone(value) {
@@ -102,21 +106,16 @@
 
   function versionHash(state) {
     var normalized = normalize(state);
-    // Use crypto SHA-256 (Node.js) — produces unique hashes matching wire.py's format.
-    // Truncated to first 8 hex chars (4 bytes / u32) for base_version compatibility.
-    var salt = normalized.entries.length.toString() + '_' + _version_counter;
-    if (typeof require !== 'undefined') {
-      try { return require('crypto').createHash('sha256').update(salt).digest().toString('hex').slice(0, 8); } catch(e) {}
-    }
-    // Browser fallback: FNV-1a with unique salt to avoid collisions.
-    var h = BigInt(0xD87559C76B628D2F);
-    var p = BigInt(0x1000000000000000B);
-    for (var i = 0; i < salt.length; i++) {
-      h ^= BigInt(salt.charCodeAt(i));
-      h *= p;
-    }
-    // Use full 64-bit output, take first 8 hex chars — FNV-1a collisions are extremely unlikely with this salt.
-    return ('00000000' + ((h & 0xFFFFFFFFFFFFFFFFn).toString(16))).slice(-8);
+    // Hash the canonical entries with the same environment-agnostic digest used
+    // by entityId (pure BigInt FNV-1a, synchronous, no Node/browser branch): the
+    // base_version is a function of state content only, so it is identical in
+    // Node and the browser, stable across processes, and changes when any entry
+    // changes. Truncated to the first 8 hex chars (4 bytes / u32) for
+    // base_version compatibility.
+    var ops = normalized.entries.map(function (entry) {
+      return stableStringify(entry);
+    }).join('|');
+    return hash(ops).slice(0, 8);
   }
 
   function applyDelta(state, delta) {
