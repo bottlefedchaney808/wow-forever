@@ -1,0 +1,10 @@
+HTTP/2 403 
+server: CloudFront
+date: Fri, 30 Oct 2026 13:46:07 GMT
+content-type: text/html
+content-length: 919
+x-cache: Error from cloudfront
+via: 1.1 23db33dd853a14ef207652c1841a5214.cloudfront.net (CloudFront)
+x-amz-cf-pop: DFW57-P9
+x-amz-cf-id: k3NhkObe0hK1oBoTzDLQg0ecDOSBZ-gm8ua3sxWL7uTBPLbSx_NcmA==
+
