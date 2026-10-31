@@ -78,20 +78,28 @@
     <div class="grp"><label><input type="checkbox" data-group="class-trainers" checked> Class trainers</label></div>
     <div class="grp"><label><input type="checkbox" data-group="training-supplies" checked> Training &amp; supplies</label></div>
     <div class="grp"><label><input type="checkbox" data-group="rares" checked> Rare / rare-elite NPCs</label></div>
+    <div class="grp" id="row-routes" style="display:none"><label><input type="checkbox" data-group="routes" checked> Travel routes (flight paths, ships, zeppelins, tram)</label></div>
+    <div class="grp" id="row-voyages" style="display:none"><label><input type="checkbox" data-group="voyages" checked> Voyage itineraries (dashed)</label></div>
 
     <h2>Herbs <span class="note">(click to toggle each)</span></h2>
     <div id="herb-list"></div>
     <h2>Mining <span class="note">(click to toggle each)</span></h2>
     <div id="mine-list"></div>
+    <h2>Fishing <span class="note">(click to toggle each)</span></h2>
+    <div id="fish-list"></div>
+    <h2>Leather <span class="note">(click to toggle each)</span></h2>
+    <div id="leather-list"></div>
+    <h2>Cloth <span class="note">(click to toggle each)</span></h2>
+    <div id="cloth-list"></div>
 
     <h2>Leveling Plan (1&rarr;60)</h2>
     <div id="plan"></div>
 
     <div class="legend-tip">
       Offline remake of wowhead.com/forever/world-map. Tiles: 9,288 webp (native z7 = 256px).
-      49 zones · 256 landmarks · 1,285 POIs · 17,637 gather nodes.
+      <span id="dataset-counts">49 zones · 256 landmarks · 1,285 POIs · 17,637 gather nodes.</span>
       Move mouse over map to read canvas coords (x/y px, 1px = 1/533.33 yd).
-      <span class="note">Dataset v14 · hash dae2c49d156c8dfb</span>
+      <span class="note">Dataset v14 · hash e93ba393fb0a40cc</span>
     </div>
   </div>
 </div>
@@ -100,8 +108,27 @@
 <script src="data/places.js"></script>
 <script src="data/pois.js"></script>
 <script src="data/nodes.js"></script>
+<script src="data/routes.js"></script>
+<script src="data/voyages.js"></script>
 <script src="data/questlog_schema.js"></script>
 <script>
+// ---------- footer counts from the datasets that actually loaded ----------
+// The panel footer must state the shipped generation's real numbers,
+// whatever files exist (September fallback: no routes/voyages files).
+(function () {
+  function fmt(n) { return n.toLocaleString('en-US'); }
+  var zones = window.WH_PLACES ? window.WH_PLACES.zones.length : 0;
+  var landmarks = window.WH_PLACES ? window.WH_PLACES.landmarks.length : 0;
+  var pois = window.WH_POIS ? window.WH_POIS.length : 0;
+  var nodes = window.WH_NODES ? Object.keys(window.WH_NODES).reduce(function (t, k) {
+    return t + window.WH_NODES[k].pts.length;
+  }, 0) : 0;
+  var parts = [zones + ' zones', landmarks + ' landmarks', fmt(pois) + ' POIs', fmt(nodes) + ' gather nodes'];
+  if (window.WH_ROUTES) parts.push(fmt(window.WH_ROUTES.length) + ' routes');
+  if (window.WH_VOYAGES) parts.push(fmt(window.WH_VOYAGES.length) + ' voyages');
+  var el = document.getElementById('dataset-counts');
+  el.textContent = parts.join(' · ') + (parts.length === 4 ? '.' : ' · per-node toggles · routes + dashed voyages on the map.');
+})();
 // ---------- coordinate space: canvas 44544 x 29696 px ----------
 var CW = 44544, CH = 29696;
 var KAL = { w: 25088, h: 28672, ox: 0, oy: 0 };
@@ -200,7 +227,6 @@ var CAT = {
   'ammunition':     { c: '#7f8c8d', t: 'A' },
   'reagents':       { c: '#16a085', t: 'V' }
 };
-var CATS = window.WH_POIS ? {} : {};
 window.WH_POIS.forEach(function (p) { if (p.c.indexOf('class-trainer') === 0) CAT[p.c] = { c: '#ffd700', t: 'C' }; });
 
 function pin(cat, size) {
@@ -300,7 +326,34 @@ window.WH_POIS.forEach(function (p) {
   m.on('contextmenu', function () { removeQlog(p.n, p.ll); });
   poiLayers[grp].addLayer(m);
 });
-var groupChecked = { instance: true, transport: true, npc: true, 'class-trainers': true, 'training-supplies': true, rares: true };
+
+// ---------- routes / voyages polylines (guarded: September data has no files) ----------
+if (window.WH_ROUTES) {
+  var routeLayer = L.layerGroup();
+  var VESSEL_COLORS = { 'flight-master': '#f0ad4e', 'ship': '#4a90d9', 'zeppelin': '#5bc0de', 'tram': '#a569bd' };
+  window.WH_ROUTES.forEach(function (r) {
+    var latlngs = r.points;
+    if (!latlngs || latlngs.length < 2) return;
+    routeLayer.addLayer(L.polyline(latlngs, {
+      color: VESSEL_COLORS[r.vessel] || '#8fa3c7', weight: 2, opacity: 0.6
+    }));
+  });
+  poiLayers.routes = routeLayer;
+  document.getElementById('row-routes').style.display = '';
+}
+if (window.WH_VOYAGES) {
+  var voyageLayer = L.layerGroup();
+  window.WH_VOYAGES.forEach(function (v) {
+    var latlngs = (v.stops || []).map(function (s) { return s.ll; });
+    if (latlngs.length < 2) return;
+    voyageLayer.addLayer(L.polyline(latlngs, {
+      color: '#f0c674', weight: 2, opacity: 0.6, dashArray: '6 6'
+    }));
+  });
+  poiLayers.voyages = voyageLayer;
+  document.getElementById('row-voyages').style.display = '';
+}
+var groupChecked = { instance: true, transport: true, npc: true, 'class-trainers': true, 'training-supplies': true, rares: true, routes: true, voyages: true };
 Object.keys(poiLayers).forEach(function (g) { if (groupChecked[g]) poiLayers[g].addTo(map); });
 document.querySelectorAll('input[data-group]').forEach(function (cb) {
   cb.addEventListener('change', function () {
@@ -309,19 +362,30 @@ document.querySelectorAll('input[data-group]').forEach(function (cb) {
   });
 });
 
-// ---------- node categories (herbs/mining) ----------
-var nodeLayers = {};
-function nodeColor(key, i) {
-  var hue = key.indexOf('herb') === 0 ? (95 + (i % 5) * 14) : (25 + (i % 5) * 12);
-  return 'hsl(' + hue + ',65%,55%)';
+// ---------- node categories (herb / ore / fish / leather / cloth) ----------
+// Prefix map on the text before the first '-'; the old binary herb/else
+// split silently dumped fish/leather/cloth into the Mining list in ore hues.
+var CATS = {herb:'herb-list', ore:'mine-list', fish:'fish-list', leather:'leather-list', cloth:'cloth-list'};
+var CAT_HUES = {herb: 95, ore: 25, fish: 195, leather: 350, cloth: 275};
+function nodeCat(key) {
+  var dash = key.indexOf('-');
+  var p = dash === -1 ? key : key.slice(0, dash);
+  return CATS[p] ? p : 'ore';
 }
-var hi = 0, mi = 0;
+function nodeColor(cat, i) {
+  // one hue family per category; fish/leather/cloth never share ore's hues
+  var step = cat === 'herb' ? 14 : (cat === 'leather' ? 4 : 12);
+  return 'hsl(' + (CAT_HUES[cat] + (i % 5) * step) + ',65%,55%)';
+}
+var nodeLayers = {};
+var catIndex = {herb: 0, ore: 0, fish: 0, leather: 0, cloth: 0};
 Object.keys(window.WH_NODES).forEach(function (k) {
   var n = window.WH_NODES[k];
-  var col = nodeColor(k, k.indexOf('herb') === 0 ? (hi++) : (mi++));
+  var cat = nodeCat(k);
+  var col = nodeColor(cat, catIndex[cat]++);
   nodeLayers[k] = {
     points: n.pts, color: col, name: n.n,
-    herb: k.indexOf('herb') === 0, visible: false
+    cat: cat, visible: false
   };
 });
 
@@ -382,10 +446,11 @@ var NodeCanvasLayer = L.Layer.extend({
 });
 var nodeCanvasLayer = new NodeCanvasLayer();
 
-var herbBox = document.getElementById('herb-list'), mineBox = document.getElementById('mine-list');
+var categoryBoxes = {};
+Object.keys(CATS).forEach(function (cat) { categoryBoxes[cat] = document.getElementById(CATS[cat]); });
 Object.keys(nodeLayers).forEach(function (k) {
   var nd = nodeLayers[k];
-  var box = nd.herb ? herbBox : mineBox;
+  var box = categoryBoxes[nd.cat] || categoryBoxes.ore;
   var lab = document.createElement('label');
   lab.className = 'sub';
   lab.innerHTML = '<input type="checkbox"> <span class="chip" style="background:' + nd.color + '"></span> ' + nd.name;

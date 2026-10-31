@@ -14,10 +14,18 @@
     },
     {
       "path": "data/questlog_schema.js",
-      "sha256": "e28dcf9a384b39994be802e09c802fac6fba7d97b0e7f26156ab18ca44d238d8"
+      "sha256": "7a6155b48e9893aca58994403468eb868f9bc41f714f69452b2d7d5d4cc84642"
+    },
+    {
+      "path": "data/routes.js",
+      "sha256": null
+    },
+    {
+      "path": "data/voyages.js",
+      "sha256": null
     }
   ],
-  "dataset_version": "dae2c49d156c8dfb",
+  "dataset_version": "e93ba393fb0a40cc",
   "manifest_format": 1,
   "tile_packs": {
     "eastern-kingdoms": {

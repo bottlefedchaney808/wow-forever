@@ -29,9 +29,14 @@ quest-log versionHash and exits non-zero on mismatch.)
 - **Map** — both continents (Kalimdor + Eastern Kingdoms), all 9,288 tiles at
   full native resolution (z7 = 256 px). Custom Leaflet CRS so tiles line up
   exactly with the Wowhead canvas (44544 x 29696 px).
-- **Overlays** — 49 zone labels, 256 landmarks, 1,285 POIs (dungeons, raids,
+- **Overlays** — zone labels, landmark labels, POIs (dungeons, raids,
   zeppelins/ships, inns, banks, flight masters, graveyards, class trainers,
-  rares), and 17,637 gather nodes (herbs + ore, per-node toggles).
+  rares), gather nodes with per-node toggles in five categories (herb / ore /
+  fish / leather / cloth, discovered from the dataset key prefixes), and —
+  when `data/routes.js` / `data/voyages.js` are present — travel-route
+  polylines plus dashed voyage itineraries. The panel footer prints the exact
+  counts of whatever datasets loaded, so it never drifts from the shipped
+  generation.
 - **Quest log** — click any pin / zone label / search result (or a zone/dungeon
   name in the leveling plan) to pin it. Numbered markers appear on the map and
   in the panel. Right-click removes. Saved in browser localStorage, survives
