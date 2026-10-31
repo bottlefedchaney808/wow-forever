@@ -23,7 +23,13 @@ DATA_FILES = {
     "places": ("data/places.js", "WH_PLACES"),
     "pois": ("data/pois.js", "WH_POIS"),
     "nodes": ("data/nodes.js", "WH_NODES"),
+    # routes/voyages are new in the tree-16 refresh (Task 9): duplicate +
+    # coordinate checks only, no count floors, and OPTIONAL — the September
+    # fallback generation has no such files and the audit must stay green.
+    "routes": ("data/routes.js", "WH_ROUTES"),
+    "voyages": ("data/voyages.js", "WH_VOYAGES"),
 }
+OPTIONAL_DATA_FILES = {"routes", "voyages"}
 
 # A small set of well-known settlements/landmarks paired with their zone-label
 # anchor. Zones are labels, not polygons, so this deliberately uses a generous
@@ -124,6 +130,20 @@ def audit_dataset(data: Any, name: str) -> tuple[int, list[str]]:
         for node_key, node in data.items():
             for index, point in enumerate(node.get("pts", [])):
                 visit({"n": node.get("n"), "ll": point}, f"nodes.{node_key}[{index}]")
+    elif name == "routes" and isinstance(data, list):
+        # routes (Task 9): duplicate check on the full route record; every
+        # polyline point gets the coordinate check. No count floors.
+        for index, route in enumerate(data):
+            visit(route, f"routes[{index}]")
+            for point_index, point in enumerate(route.get("points", [])):
+                issues.extend(_coordinate_issues({"ll": point},
+                    f"routes[{index}].points[{point_index}]"))
+    elif name == "voyages" and isinstance(data, list):
+        for index, voyage in enumerate(data):
+            visit(voyage, f"voyages[{index}]")
+            for stop_index, stop in enumerate(voyage.get("stops", [])):
+                issues.extend(_coordinate_issues({"ll": stop.get("ll")},
+                    f"voyages[{index}].stops[{stop_index}]"))
     else:
         for index, record in enumerate(records):
             visit(record, f"{name}[{index}]")
@@ -221,6 +241,11 @@ def run_audit(root: Path = ROOT) -> int:
 
     loaded: dict[str, Any] = {}
     for name, (relpath, variable) in DATA_FILES.items():
+        if name in OPTIONAL_DATA_FILES and not (root / relpath).is_file():
+            # September-data fallback: a generation ships without the
+            # routes/voyages datasets; the audit stays green without them.
+            _report(f"{name} data (absent — optional)", [])
+            continue
         try:
             loaded[name] = parse_js_assignment((root / relpath).read_text(encoding="utf-8"), variable)
             count, issues = audit_dataset(loaded[name], name)

@@ -21,6 +21,18 @@ from typing import Any
 WOWHEAD_DATA_VERSION = 14
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent / "data"
 DEFAULT_TILE_DIR = Path(__file__).resolve().parent / "tiles"
+# Every dataset the manifest pins, with the window variable its file must
+# define. routes/voyages joined the set in the tree-16 refresh (Task 9);
+# they are OPTIONAL — the September generation ships without them, and a
+# missing optional dataset gets a null-hash entry so the manifest schema
+# names it explicitly.
+MANIFEST_DATASETS = (
+    ("data/places.js", "WH_PLACES", False),
+    ("data/pois.js", "WH_POIS", False),
+    ("data/nodes.js", "WH_NODES", False),
+    ("data/routes.js", "WH_ROUTES", True),
+    ("data/voyages.js", "WH_VOYAGES", True),
+)
 
 
 def sha256_file(path: Path) -> str:
@@ -48,6 +60,21 @@ def build_manifest(root: Path | str) -> dict[str, Any]:
     data_files = []
     for path in sorted(p for p in data_dir.rglob("*") if p.is_file()):
         data_files.append({"path": path.relative_to(root).as_posix(), "sha256": sha256_file(path)})
+    # The manifest explicitly names every dataset (Task 9 routes/voyages
+    # guard). Required files must exist and define their window variable;
+    # an absent optional dataset is named with a null hash.
+    listed = {entry["path"] for entry in data_files}
+    for relpath, variable, optional in MANIFEST_DATASETS:
+        file_path = root / relpath
+        if file_path.is_file():
+            _parse_js_data(file_path, variable)
+            if relpath not in listed:
+                data_files.append({"path": relpath, "sha256": sha256_file(file_path)})
+        elif optional:
+            data_files.append({"path": relpath, "sha256": None})
+        else:
+            raise FileNotFoundError(f"required dataset missing: {relpath}")
+    data_files.sort(key=lambda entry: entry["path"])
 
     packs: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for path in sorted(p for p in tile_dir.rglob("*") if p.is_file()):
