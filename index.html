@@ -9,7 +9,8 @@
 <style>
   html, body { height: 100%; margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: #0b0e14; }
   #app { display: flex; height: 100%; }
-  #map { flex: 1; height: 100%; background: #0e1a2f; }
+  #map { flex: 1; height: 100%; background: #050a16; } /* ocean darker than land tiles (land luminance 59-76) */
+  .leaflet-tile { filter: brightness(2.2); } /* land mask ships near-black at low zooms; lift it above the ocean */
   #panel { width: 340px; min-width: 260px; background: #12151c; color: #cfd6e4; overflow-y: auto;
            border-left: 1px solid #232838; padding: 10px 12px; font-size: 13px; }
   #panel h1 { font-size: 15px; margin: 2px 0 8px; color: #f0c674; }
