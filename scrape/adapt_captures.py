@@ -66,16 +66,21 @@ Half-open acceptance rule (audit.py bound `0 <= cx < CANVAS[0] and
     out-of-range points are REJECTED, never clamped (lat == 0 and lng == 1
     fail the canvas test).
 
-Dedupe (plan Task 9 Step 3, verbatim): (n, ll) records, first occurrence
-wins. routes/voyages carry no `n`; their identity is the full record (the
-same identity audit.py flags), so their dedupe key is the canonical JSON of
-the record.
+Dedupe (plan Task 9 Step 3): places use (n, ll), first occurrence wins.
+Same landmark name at a different coordinate is a second entrance
+(ENDPOINTS.md: 13 names, 2 records) and is kept. Pois are NOT collapsed on
+(n, ll) alone: 573/4469 share a name and pixel but differ in category, npc,
+or side (innkeeper vs quest-giver). audit.py flags only full-record
+identity, so pois/routes/voyages dedupe on canonical JSON of the shipped
+record. Collapsing those pois would delete 12.8% of a valid capture.
 
-STOP: if dropped points (out-of-range rejections + dedupe drops) exceed 1%
-of a dataset, --write REFUSES the refresh and reports the exact per-dataset
-numbers (no clamping, no partial ship). --dry-run never refuses; it prints
-the counts dict and the drop report. Count floors live only in
-write_datasets.BASELINE; audit.py has no count baselines.
+STOP: coordinate rejections only (never clamps). If out-of-range points
+exceed 1% of a dataset, --write REFUSES and leaves data/ untouched.
+Intentional exact-duplicate removal is reported separately and does not
+trip the ceiling — the 7 identical landmark (n, ll) copies are 2.15% of
+zone+town+landmark records and would otherwise block a clean capture.
+--dry-run prints counts, coord rejections, and dedupe counts. Count floors
+live only in write_datasets.BASELINE; audit.py has no count baselines.
 
 Usage:
     /usr/bin/python3 scrape/adapt_captures.py --dry-run   # counts + drops only
@@ -91,6 +96,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scrape"))
 
 import write_datasets as wd
@@ -141,18 +147,19 @@ def _record_identity(record: dict) -> str:
 def prepare_all(captures: dict, dedupe: str = "plan", max_drop: float = STOP_RATIO) -> dict:
     """Hardened writer inputs + counts + drop report (STOP enforced by caller).
 
-    dedupe="plan" (default): the plan's literal (n, ll) key — routes/voyages
-    have no `n`, so their identity is the full record.
-    dedupe="audit": dedupe ONLY what audit.py's duplicate check would flag
-    (exact full-record identity for places/pois/routes/voyages; {n, ll} per
-    node point, which is the record audit visits). This is the minimum
-    deletion that keeps `audit.py` green; it drops no pois at all.
-    max_drop: STOP ratio; the plan's 1% floor is the default and only a
-    controller-authorized --max-drop relaxes it.
+    dedupe="plan" (default): places use (n, ll). Different coordinates for the
+    same name are kept. Pois use full-record identity (category/npc/side are
+    part of the record — see module docstring). routes/voyages have no `n`;
+    their identity is the full record.
+    dedupe="audit": same full-record identity audit.py flags, including places.
+    max_drop: STOP ratio on coordinate rejections only. The plan's 1% floor is
+    the default; only a controller-authorized --max-drop relaxes it.
     """
-    by_key = _record_identity if dedupe == "audit" else (lambda r: (r["n"], tuple(r["ll"])))
+    place_key = _record_identity if dedupe == "audit" else (lambda r: (r["n"], tuple(r["ll"])))
     names = _node_names()
-    drops = {"zones": 0, "landmarks": 0, "pois": 0, "nodes": 0, "routes": 0, "voyages": 0}
+    # coord = out-of-range rejections (STOP numerator). deduped = intentional copies.
+    coord = {"zones": 0, "landmarks": 0, "pois": 0, "nodes": 0, "routes": 0, "voyages": 0}
+    deduped = {"zones": 0, "landmarks": 0, "pois": 0, "nodes": 0, "routes": 0, "voyages": 0}
     totals = {"zones": 0, "landmarks": 0, "pois": len(captures["pois"]),
               "nodes": sum(len(g["points"]) for g in captures["nodes"]),
               "routes": len(captures["routes"]), "voyages": len(captures["voyages"])}
@@ -173,11 +180,11 @@ def prepare_all(captures: dict, dedupe: str = "plan", max_drop: float = STOP_RAT
         record = {"n": p["name"], "ll": list(normalize(p["x"], p["y"])),
                   "mz": MZ_ZONES if bucket == "zones" else MZ_LANDMARKS}
         if not in_half_open(record["ll"]):
-            drops[bucket] += 1
+            coord[bucket] += 1
             continue
-        key = by_key(record)
+        key = place_key(record)
         if key in seen[bucket]:
-            drops[bucket] += 1
+            deduped[bucket] += 1
             continue
         seen[bucket].add(key)
         (zones if bucket == "zones" else landmarks).append(record)
@@ -194,11 +201,11 @@ def prepare_all(captures: dict, dedupe: str = "plan", max_drop: float = STOP_RAT
             "side": p.get("side"),
         }
         if not in_half_open(record["ll"]):
-            drops["pois"] += 1
+            coord["pois"] += 1
             continue
-        key = by_key(record)
+        key = _record_identity(record)
         if key in seen_poi:
-            drops["pois"] += 1
+            deduped["pois"] += 1
             continue
         seen_poi.add(key)
         pois.append(record)
@@ -212,10 +219,10 @@ def prepare_all(captures: dict, dedupe: str = "plan", max_drop: float = STOP_RAT
         for pt in group["points"]:
             ll = normalize(pt[0], pt[1])  # pt[2] is a spawn index, not a coord
             if not in_half_open(ll):
-                drops["nodes"] += 1
+                coord["nodes"] += 1
                 continue
             if ll in group_seen:
-                drops["nodes"] += 1
+                deduped["nodes"] += 1
                 continue
             group_seen.add(ll)
             pts.append(list(ll))
@@ -227,14 +234,14 @@ def prepare_all(captures: dict, dedupe: str = "plan", max_drop: float = STOP_RAT
     for r in captures["routes"]:
         rid = json.dumps(r, sort_keys=True, ensure_ascii=False)
         if rid in seen_route:
-            drops["routes"] += 1
+            deduped["routes"] += 1
             continue
         seen_route.add(rid)
         pts = []
         for pt in r["points"]:
             ll = normalize(pt[0], pt[1])
             if not in_half_open(ll):
-                drops["routes"] += 1
+                coord["routes"] += 1
                 continue
             pts.append(list(ll))
         routes.append({
@@ -251,14 +258,14 @@ def prepare_all(captures: dict, dedupe: str = "plan", max_drop: float = STOP_RAT
     for v in captures["voyages"]:
         vid = json.dumps(v, sort_keys=True, ensure_ascii=False)
         if vid in seen_voyage:
-            drops["voyages"] += 1
+            deduped["voyages"] += 1
             continue
         seen_voyage.add(vid)
         stops = []
         for st in v["stops"]:
             ll = normalize(st["x"], st["y"])
             if not in_half_open(ll):
-                drops["voyages"] += 1
+                coord["voyages"] += 1
                 continue
             stops.append({"name": st.get("name"), "side": st.get("side"),
                           "dwell": st.get("dwell"), "ll": list(ll)})
@@ -279,16 +286,20 @@ def prepare_all(captures: dict, dedupe: str = "plan", max_drop: float = STOP_RAT
         "routes": len(routes),
         "voyages": len(voyages),
     }
+    # Coordinate rejections are the STOP numerator. Exact-duplicate removal
+    # is reported beside them and is not a scrape failure.
     drop_report = {}
     for name in DATASETS:
         if name == "places":
-            dropped = drops["zones"] + drops["landmarks"]
+            rejected = coord["zones"] + coord["landmarks"]
+            copied = deduped["zones"] + deduped["landmarks"]
             total = totals["zones"] + totals["landmarks"]
         else:
-            dropped = drops[name]
+            rejected = coord[name]
+            copied = deduped[name]
             total = totals[name]
-        drop_report[name] = {"dropped": dropped, "total": total,
-                             "pct": dropped / total if total else 0.0}
+        drop_report[name] = {"dropped": rejected, "deduped": copied, "total": total,
+                             "pct": rejected / total if total else 0.0}
     return {
         "objects": {
             "places": {"zones": zones, "landmarks": landmarks},
@@ -345,7 +356,8 @@ def main(argv=None) -> int:
 
     print("counts:", json.dumps(prepared["counts"]))
     for name, info in prepared["drops"].items():
-        print(f"drops:  {name:8s} {info['dropped']:5d}/{info['total']:5d} = {100 * info['pct']:.3f}%")
+        print(f"drops:  {name:8s} coords {info['dropped']:5d}/{info['total']:5d} "
+              f"= {100 * info['pct']:.3f}%  deduped {info['deduped']}")
 
     refused = refused_datasets(prepared["drops"], args.max_drop)
     if refused:
@@ -380,8 +392,14 @@ def main(argv=None) -> int:
                 print(f"  - {issue}", file=sys.stderr)
             return 2
         import os
+        import shutil
+        # tempfile may land on another filesystem than data/; os.replace then
+        # raises EXDEV. Stage beside the destination and replace in-place.
         for name in writers:
-            os.replace(tmp_dir / f"{name}.js", DATA / f"{name}.js")
+            dest = DATA / f"{name}.js"
+            staged = dest.with_suffix(".js.swap")
+            shutil.copy2(tmp_dir / f"{name}.js", staged)
+            os.replace(staged, dest)
     print(f"wrote {len(writers)} datasets into {DATA}")
     return 0
 

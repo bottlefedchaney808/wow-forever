@@ -2,15 +2,15 @@
   "data_files": [
     {
       "path": "data/nodes.js",
-      "sha256": "ad56ca68de97b2716361e399ca2ac990000ebbd8b9f3aa665b50fe89016c343b"
+      "sha256": "5080b1d530113290f3f9efe91f6df0ab227c881bdfc2ae956ea36efb776022e2"
     },
     {
       "path": "data/places.js",
-      "sha256": "9b7437b17fa26c7ff4412def74a2f938eb5598b48d67a3dac08068819f8e8db3"
+      "sha256": "c8839778eed1a05999215813ba6a2243f65f341edf433ae9dca42e7383805c43"
     },
     {
       "path": "data/pois.js",
-      "sha256": "c51bb782cf082fd6928591faf088ce3490f98791fc623637e58ab0e2632c7369"
+      "sha256": "27df03716768ef7149f6eb355f2f43e248bb39a0d465eb13012d260bfc5ab3e1"
     },
     {
       "path": "data/questlog_schema.js",
@@ -18,14 +18,14 @@
     },
     {
       "path": "data/routes.js",
-      "sha256": null
+      "sha256": "3ce7146dcd278fc721fbd4f8f360cb43f6ba047c8c901831cd05cfe58e755ec4"
     },
     {
       "path": "data/voyages.js",
-      "sha256": null
+      "sha256": "d134bcd5db81a5d9f4e9c8f83eefeecfb0b48f30f5c478e020a16b98cc537cce"
     }
   ],
-  "dataset_version": "e93ba393fb0a40cc",
+  "dataset_version": "0576120c58f531c2",
   "manifest_format": 1,
   "tile_packs": {
     "eastern-kingdoms": {

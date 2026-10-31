@@ -51,8 +51,11 @@ quest-log versionHash and exits non-zero on mismatch.)
 
 ## Data provenance
 
-- World map data: Wowhead Nether `world-map` endpoint (dv=14), parsed to
-  `data/places.js`, `data/pois.js`, `data/nodes.js`.
+- World map data: Wowhead Nether `forever/data/world-map` (tree 16, captured
+  2026-10-30), parsed to `data/places.js` (50 zones including Zephras Isle,
+  269 landmarks), `data/pois.js` (4,469), `data/nodes.js` (99 groups / 32,900
+  points), `data/routes.js` (160), `data/voyages.js` (14). Pixel coords use
+  the shipped canvas 44544×29696, not the live canvasHeight 37888.
 - Tiles: `wow.zamimg.com/images/wow/classicplus/world-map/v1/...` webp, all
   downloaded to `tiles/`.
 - Level brackets: Wowhead Forever guides (zones overview + content roadmap,
