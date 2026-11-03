@@ -186,7 +186,7 @@ var ForeverLayer = L.Layer.extend({
         if (tx < 0 || ty < 0 || tx >= maxX || ty >= maxY) continue;
         var cx = c.ox + tx * ts, cy = c.oy + ty * ts;
         var sp = map.latLngToLayerPoint([1 - cy / CH, cx / CW]);
-        var el = L.DomUtil.create('img', 'leaflet-tile');
+        var el = L.DomUtil.create('img', 'leaflet-tile leaflet-tile-loaded');
         el.onerror = function (e) { e.target.remove(); };
         el.src = 'tiles/' + c.key + '/' + tz + '/' + ty + '_' + tx + '.webp';
         el.style.width = (256 * upscale) + 'px'; el.style.height = (256 * upscale) + 'px'; el.style.position = 'absolute';
